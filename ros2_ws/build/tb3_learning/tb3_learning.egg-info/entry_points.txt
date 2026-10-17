@@ -1,2 +1,0 @@
-[console_scripts]
-obstacle_avoidance = tb3_learning.obstacle_avoidance:main
