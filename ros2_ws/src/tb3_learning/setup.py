@@ -26,5 +26,9 @@ setup(
         'console_scripts': [
             'obstacle_avoidance = tb3_learning.obstacle_avoidance:main',
         ],
+        'console_scripts': [
+            'obstacle_avoidance = tb3_learning.obstacle_avoidance:main',
+            'move_and_report = tb3_learning.move_and_report:main',
+        ],
     },
 )
