@@ -1,6 +1,14 @@
-.venv/
+# colcon / ROS 2 构建产物（可重新生成，不进版本库）
+build/
+install/
+log/
+
+# Python 缓存
 __pycache__/
-*.pyc
-ros2_ws/build/
-ros2_ws/install/
-ros2_ws/log/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# 虚拟环境
+.venv/
+venv/

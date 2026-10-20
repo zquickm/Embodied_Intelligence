@@ -25,10 +25,9 @@ setup(
     entry_points={
         'console_scripts': [
             'obstacle_avoidance = tb3_learning.obstacle_avoidance:main',
-        ],
-        'console_scripts': [
-            'obstacle_avoidance = tb3_learning.obstacle_avoidance:main',
             'move_and_report = tb3_learning.move_and_report:main',
+            'camera_viewer = tb3_learning.camera_viewer:main',
+            'camera_detector = tb3_learning.camera_detector:main',
         ],
     },
 )
