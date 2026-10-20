@@ -3,6 +3,9 @@ build/
 install/
 log/
 
+# Isaac Lab / RL 训练产物
+logs/
+
 # Python 缓存
 __pycache__/
 *.py[cod]

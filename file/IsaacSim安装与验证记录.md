@@ -258,14 +258,149 @@ D:\isaac\env\python.exe your_script.py
 2. **模块 B**：MuJoCo（已随 Isaac Sim 装上 3.12.0）
 3. **模块 C**：Isaac Lab 安装（下一步）
 
-### 7.3 下一步建议
+### 7.3 下一步
 
-**安装 Isaac Lab**。它是建立在 Isaac Sim 之上的 RL 训练框架，提供并行环境和任务定义。Isaac Lab 2.x/3.x 支持对接已有的 Isaac Sim 安装。
+Isaac Lab 已完成安装与验证，见第 8 节。可以开始模块 A（PyTorch/RL 基础）与模块 C（自定义训练任务）。
 
-需要注意：Isaac Lab 对 Isaac Sim 版本有配对要求，安装前先查兼容性表。
+---
+
+## 8. Isaac Lab 3.0.0 安装与验证
+
+### 8.1 版本配对（关键）
+
+| Isaac Lab 分支 | 对应 Isaac Sim |
+|---|---|
+| `main` | **6.2** ← 本机使用的版本 |
+| `release/3.0.0` | 6.2 |
+| `develop` | 6.2 |
+
+已装 Isaac Sim 6.2.0.0，所以用 **Isaac Lab 3.0.0**。配对关系来源：[Cross-product compatibility](https://docs.isaacsim.omniverse.nvidia.com/latest/installation/compatibility.html)
+
+### 8.2 安装方式
+
+**比预期简单**：Isaac Lab 已发布到 PyPI，不需要 clone 仓库。
+
+```powershell
+D:\isaac\env\python.exe -m pip install "isaaclab==3.0.0" `
+    --extra-index-url https://pypi.nvidia.com
+```
+
+**为什么用 pip 而不是 clone 仓库**：
+- `isaaclab` 是单包（12.4 MB），但解压后包含全部子包：`isaaclab_tasks`、`isaaclab_assets`、`isaaclab_rl`、`isaaclab_mimic`、`isaaclab_contrib` 等
+- 自带 `isaaclab.exe` CLI，封装了 `train`/`play`/`demo`/`list_envs` 等命令，不需要仓库里的 `scripts/`
+- 省去 clone + `./isaaclab.sh --install` 的复杂流程
+
+### 8.3 依赖冲突与解决
+
+装完 Isaac Lab 后，pip 报告与 Isaac Sim 的 4 个版本冲突：
+
+```
+isaacsim-core   要求 llvmlite==0.46.0   → 被升到 0.50.0
+isaacsim-kernel 要求 click==8.3.3       → 被升到 8.5.0
+isaacsim-kernel 要求 psutil==5.9.8      → 被升到 7.2.2
+isaacsim-kernel 要求 urllib3==2.7.0     → 被升到 2.8.0
+```
+
+**处理方式**：优先保证 Isaac Sim 的精确 pin（仿真器是核心依赖），把可以对齐的装回去：
+
+```powershell
+D:\isaac\env\python.exe -m pip install "numba==0.63.1" "click==8.3.3" "psutil==5.9.8"
+```
+
+`numba==0.63.1` 会带回 `llvmlite==0.46.0`，正好匹配 Isaac Sim 的要求。
+
+**剩余 3 个冲突无法消除（三角依赖）**：
+
+| 包 | Isaac Sim 要 | 其他库要 | 实际影响 |
+|---|---|---|---|
+| click | `==8.3.3` | huggingface-hub 要 `>=8.4.2` | 仅影响 `hf` 命令行工具，训练不受影响 |
+| psutil | `==5.9.8` | ipython 要 `>=7` | 仅影响 IPython 的进程信息显示 |
+| urllib3 | `==2.7.0` | isaaclab 要 `>=2.8.0` | 实测无影响 |
+
+**结论：这 3 个冲突是元数据层面的，实测不影响运行。** `pip check` 会一直报，不用管。
+
+### 8.4 训练验证（成功）
+
+```powershell
+$env:OMNI_KIT_ACCEPT_EULA = "YES"
+D:\isaac\env\Scripts\isaaclab.exe train --rl_library rsl_rl `
+    --task Isaac-Cartpole --num_envs 64 --max_iterations 30
+```
+
+**输出关键信息**：
+
+```
+Task            Isaac-Cartpole
+Workflow        manager-based
+RL library      rsl_rl
+Physics         newton_mjwarp
+Device          cuda:0
+Environments    64
+
+[INFO]: Time taken for simulation start: 36.6 s
+Learning iteration 1/30
+   Mean reward: 0.00   Mean episode length: 8.5
+Learning iteration 30/30
+   Mean reward: 32.70  Mean episode length: 98.0
+Total time: 25.95 s
+```
+
+**结论**：
+- 训练可跑通，退出码 0
+- **约 7000 steps/sec**（64 环境，CUDA graph 预热后）
+- Cartpole 从 8.5 步学到 98 步，说明策略在收敛
+- 物理后端是 `newton_mjwarp`（Newton + MuJoCo Warp），不是 PhysX —— 这是 Isaac Lab 3.0 的新默认
+
+### 8.5 CLI 命令参考
+
+```powershell
+# 列出所有环境
+isaaclab.exe list_envs --all
+# 按关键字过滤
+isaaclab.exe list_envs --keyword Cartpole
+# 训练（可选后端: rl_games, rlinf, rsl_rl, sb3, skrl, torchrl）
+isaaclab.exe train --rl_library rsl_rl --task <TaskName> --num_envs 64 --max_iterations 100
+# 用训练好的策略回放
+isaaclab.exe play --rl_library rsl_rl --task <TaskName> --checkpoint <path>
+# 跑打包好的示例
+isaaclab.exe example --help
+isaaclab.exe demo --help
+```
+
+### 8.6 已知行为（要注意）
+
+**训练日志默认写到"当前工作目录"下的 `logs/`**。如果在项目仓库里运行，会在仓库里生成 `logs/` 目录。
+
+本次验证时因为 shell 的工作目录是 WSL 项目路径，日志通过 9P 写到了
+`\\wsl.localhost\...\embodied-intelligence\logs\rsl_rl\cartpole\`。
+
+**处理**：已在 `.gitignore` 里加入 `logs/`。**建议以后在专门的工作目录运行训练**（例如 `D:\isaac\work`），不要放在 git 仓库里，避免 9P 写入拖慢训练。
+
+### 8.7 最终版本锁定表
+
+| 组件 | 版本 | 备注 |
+|---|---|---|
+| Python | 3.12.15 | Isaac Sim 6.x 强制 |
+| pip | **25.3** | 升到 26 会崩 |
+| Isaac Sim | 6.2.0.0 | |
+| Isaac Lab | 3.0.0 | |
+| torch | 2.11.0+cu128 | |
+| warp-lang | 1.17.0 | 被 Isaac Lab 从 1.18.0 降级 |
+| newton | 1.6.1 | |
+| mujoco | 3.12.0 | |
+| mujoco-warp | 3.12.0 | |
+| numba | 0.63.1 | 锁死，升了会带动 llvmlite |
+| llvmlite | 0.46.0 | Isaac Sim 精确要求 |
+| click | 8.3.3 | Isaac Sim 精确要求 |
+| psutil | 5.9.8 | Isaac Sim 精确要求 |
+| urllib3 | 2.8.0 | 冲突未解，实测无影响 |
+| rsl-rl-lib | 5.5.1 | Isaac Lab 的 PPO 实现 |
+
+**环境总大小**：约 20 GB（`D:\isaac\env`）
 
 ---
 
 *记录人：AI 助手*
-*验证时间：2026-10-20 19:41*
+*Isaac Sim 验证：2026-10-20 19:41*
+*Isaac Lab 验证：2026-10-20 22:34*
 *环境：Windows 11 23H2 / RTX 5070 Ti 16GB / Ryzen 5 9600X / 48GB RAM*
