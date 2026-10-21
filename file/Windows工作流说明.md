@@ -104,16 +104,56 @@ D:\
 │   ├── env\            ← Python 环境（20 GB，不要手动改）
 │   ├── work\           ← 训练实验产物（可清空）
 │   │   ├── logs\       ← TensorBoard + checkpoint
+│   │   ├── data\       ← 数据集（MNIST 等，2026-10-21 新增）
 │   │   └── *.log       ← 训练日志
 │   ├── temp\           ← 临时文件（可清空）
 │   └── pipcache\       ← pip 缓存（可清空）
 └── work\
     └── embodied-intelligence\   ← git 仓库
         ├── file\        ← 所有文档
+        │   └── assets\  ← 训练曲线图、数据表（进 git，2026-10-21 新增）
+        ├── code\        ← 学习代码（进 git，2026-10-21 新增）
         ├── scripts\     ← activate.ps1 等工具脚本
         ├── ros2_ws\     ← ROS 2 包（WSL 相关，暂时不用）
         └── gazebo_media\ ← Gazebo 资源（同上）
 ```
+
+**新增目录的原因**：A1 起会产出两类新东西，原先的约定没覆盖。
+
+| 目录 | 放什么 | 为什么不放别处 |
+|---|---|---|
+| `code\` | 手写的训练循环、RL 算法实现（A1–A5、D1–D3） | 这些是"能讲解"的核心资产，必须进 git；放 `D:\isaac\work` 会随清空丢失 |
+| `file\assets\` | 训练曲线 png、超参表 csv、多种子汇总表 | 属于"派生产物"，体积小、可复现，进 git 后文档里的图才有出处 |
+| `D:\isaac\work\data\` | MNIST 等数据集 | 体积大、可重新下载，**不进 git** |
+
+**判断口诀**：**图、表、模板、代码 → 进仓库；原始日志、checkpoint、数据集 → 留在 isaac 盘。**
+
+---
+
+## 4.1 pip 装包的安全流程（2026-10-21 立规）
+
+Isaac 环境的依赖 pin 很脆（见第 5 节）。**任何 `pip install` 前必须先 dry-run**：
+
+```powershell
+# 第 1 步：先看会发生什么（不实际安装）
+python -m pip install --dry-run "包名==版本"
+
+# 第 2 步：确认输出里只有 "Would install"，没有版本变更
+# 第 3 步：确认无误再执行，前后各存一次快照
+python -m pip freeze | Out-File D:\isaac\work\pipfreeze_before.txt -Encoding UTF8
+python -m pip install "包名==版本"
+python -m pip freeze | Out-File D:\isaac\work\pipfreeze_after.txt -Encoding UTF8
+Compare-Object (Get-Content D:\isaac\work\pipfreeze_before.txt) (Get-Content D:\isaac\work\pipfreeze_after.txt)
+```
+
+**判定标准**：
+
+- 只有 `=>`（新增）→ 安全
+- 出现 `<=`（删除/版本变更）→ **停下**，先查这个包为什么动了 pin
+
+**装完后必须回归**：跑一次 `isaaclab train --task Isaac-Cartpole --num_envs 256 --max_iterations 20`，确认 Isaac Lab 没被破坏。
+
+**实证案例**：2026-10-21 装 Box2D/SB3/pygame-ce/pandas，dry-run 显示只新增 5 个包，实际执行后 `Compare-Object` 确认 **0 个已有包变更**，回归训练 exit=0。这套流程有效。
 
 ---
 
