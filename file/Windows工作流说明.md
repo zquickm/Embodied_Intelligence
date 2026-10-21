@@ -173,6 +173,43 @@ $s = [System.Text.Encoding]::UTF8.GetString($b)
 
 `$false` 表示不加 BOM（`.md`/`.py` 用这个），`$true` 表示加 BOM（`.ps1` 必须用这个）。
 
+### 5.5 git push 报 schannel SSL/TLS 握手失败
+
+**现象**：
+
+```
+fatal: unable to access 'https://github.com/...': schannel: failed to receive handshake, SSL/TLS connection failed
+```
+
+奇怪的是 `git fetch` 能成功，只有 `git push` 失败。
+
+**原因**：Windows 版 git 用 **schannel**（系统 TLS 栈），在特定网络环境（尤其开了代理软件时）会和 GitHub 的 TLS 握手出问题。`curl` 用自己的 TLS 实现所以正常，`git fetch` 的请求量小有时能过，`push` 的 POST 大数据量更容易失败。
+
+**解决**：让 git 走本地代理。先查代理端口：
+
+```powershell
+Get-NetTCPConnection -State Listen |
+    Where-Object { $_.LocalPort -in @(7890,7897,10808,10809) } |
+    Select-Object LocalPort, OwningProcess -Unique
+```
+
+然后用 `-c` 临时指定（不改全局配置）：
+
+```powershell
+git -c http.proxy=http://127.0.0.1:7897 push origin main
+```
+
+**为什么用 `-c` 而不是写进配置**：代理软件不一定常开，写成全局配置后关掉代理会导致所有 git 操作都失败。用 `-c` 只在这一次生效。
+
+**端口说明**：本次实测 **7897 可用，7890 不可用**。端口号取决于代理软件版本，变了自己查上一条命令。
+
+**其他备选方案**（本次未成功，但值得知道）：
+
+```powershell
+git -c http.sslBackend=openssl push origin main   # 换 OpenSSL TLS 栈
+git -c http.version=HTTP/1.1 push origin main     # 强制 HTTP/1.1
+```
+
 ---
 
 ## 6. WSL 侧的处置
