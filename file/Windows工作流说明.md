@@ -145,6 +145,34 @@ UnicodeEncodeError: 'gbk' codec can't encode character '\u259b'
 
 当前锁定 **pip 25.3**。升到 26 会触发 PEP 658 严格校验，安装 Isaac Sim 时抛 `BadMetadata` 崩溃。
 
+### 5.4 PowerShell 5.1 的 Get-Content 会误读中文
+
+**现象**：用 `Get-Content 中文文件.md` 看内容，中文全变乱码（如 `运行设备` 显示成 `杩愯璁惧`），但文件本身是好的。
+
+**原因**：Windows PowerShell 5.1 的 `Get-Content` **默认按系统代码页（GBK）解码**，即使文件是 UTF-8 也会读错。而 PS 7（pwsh）默认就是 UTF-8，所以这个问题只在 5.1 上出现。
+
+**解决**：读中文文件时显式指定编码：
+
+```powershell
+Get-Content file.md -Encoding UTF8
+```
+
+**判断文件是否真的坏了**：如果只是 `Get-Content` 显示乱码、但按 UTF-8 读取正常，那是显示问题不是文件问题。用下面这段验证：
+
+```powershell
+$b = [System.IO.File]::ReadAllBytes("文件路径")
+$s = [System.Text.Encoding]::UTF8.GetString($b)
+([regex]::Matches($s, [char]0xFFFD)).Count   # 0 表示文件是好的
+```
+
+**注意**：写文件同理，`Set-Content` 在 5.1 默认写 GBK。要写 UTF-8 用：
+
+```powershell
+[System.IO.File]::WriteAllText($path, $content, [System.Text.UTF8Encoding]::new($false))
+```
+
+`$false` 表示不加 BOM（`.md`/`.py` 用这个），`$true` 表示加 BOM（`.ps1` 必须用这个）。
+
 ---
 
 ## 6. WSL 侧的处置
