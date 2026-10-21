@@ -1,0 +1,16 @@
+# 统一换行符为 LF（Windows 与 WSL 协作，避免 CRLF 混乱）
+* text=auto eol=lf
+
+# 二进制文件不做换行符转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.pt binary
+*.pth binary
+*.onnx binary
+*.xlsx binary
+*.docx binary
+*.pptx binary
+*.zip binary

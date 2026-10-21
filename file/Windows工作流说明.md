@@ -1,0 +1,176 @@
+# Windows 工作流说明
+
+> 生效日期：2026-10-21
+> 背景：核心模块（C Isaac Sim/Lab、D 世界模型）都在 Windows 侧，仓库已从 WSL 迁到 Windows。
+
+---
+
+## 1. 三个关键位置
+
+| 用途 | 路径 | 说明 |
+|---|---|---|
+| **代码仓库** | `D:\work\embodied-intelligence` | git 仓库，文档 + 代码的唯一真实来源 |
+| **Python 环境** | `D:\isaac\env` | conda 环境，装了 Isaac Sim 6.2 + Isaac Lab 3.0 + torch cu128 |
+| **实验产物** | `D:\isaac\work` | 训练日志、checkpoint，**不进 git** |
+
+**三者分开的意义**：仓库保持干净（只有代码和文档），环境可独立重建，实验产物可随时清空不影响代码。
+
+---
+
+## 2. 每次开窗先激活
+
+```powershell
+. D:\work\embodied-intelligence\scripts\activate.ps1
+```
+
+**注意 `=` 前面有一个点和一个空格**。点号表示"在当前作用域执行"，否则设的环境变量不会留在当前窗口。
+
+**这个脚本做了 7 件事**：
+
+| # | 动作 | 不做的后果 |
+|---|---|---|
+| 1 | 设 `OMNI_KIT_ACCEPT_EULA=YES` | `import isaacsim` 卡在等待输入 |
+| 2 | `TEMP`/`TMP` 指向 D 盘 | C 盘只剩几 GB，pip 装大包必爆 |
+| 3 | `PIP_CACHE_DIR` 指向 D 盘 | 缓存占 C 盘 |
+| 4 | `PYTHONUTF8=1`、`PYTHONIOENCODING=utf-8` | **中文控制台 GBK 编码崩溃**（见第 5 节） |
+| 5 | 激活 conda 环境 `D:\isaac\env` | 用成 base 环境，找不到 isaaclab |
+| 6 | `D:\isaac\env\Scripts` 加入 PATH | 要敲全路径才能调 `isaaclab` |
+| 7 | 回显 python 路径、版本、CUDA 状态 | 环境错了也不知道 |
+
+**激活成功的标志**：
+
+```
+================ Isaac env ready ================
+  python  : D:\isaac\env\python.exe
+  version : 3.12.15
+  torch   : 2.11.0+cu128 | cuda: True
+  TEMP    : D:\isaac\temp
+  repo    : D:\work\embodied-intelligence
+=================================================
+```
+
+**看到 `cuda: True` 才算对**。如果是 `False`，说明装成了 CPU 版 torch。
+
+---
+
+## 3. 常用命令
+
+### 3.1 看有哪些任务
+
+```powershell
+isaaclab list_envs --all
+isaaclab list_envs --keyword Franka
+```
+
+### 3.2 训练
+
+```powershell
+# 建议在独立目录跑，避免日志写进仓库
+Set-Location D:\isaac\work
+isaaclab train --rl_library rsl_rl --task Isaac-Cartpole --num_envs 4096 --max_iterations 150
+```
+
+### 3.3 回放训练好的策略
+
+```powershell
+isaaclab play --rl_library rsl_rl --task Isaac-Cartpole `
+    --checkpoint "D:\isaac\work\logs\rsl_rl\cartpole\<时间戳>\model_149.pt" `
+    --num_envs 16 --real-time
+```
+
+`play` 会开窗口并一直运行，看完手动关。
+
+### 3.4 看训练曲线
+
+```powershell
+tensorboard --logdir D:\isaac\work\logs
+```
+
+然后浏览器打开 `http://localhost:6006`。
+
+**checkpoint 位置规律**：
+
+```
+D:\isaac\work\logs\rsl_rl\<experiment_name>\<时间戳>\model_<迭代号>.pt
+```
+
+---
+
+## 4. 目录约定
+
+```
+D:\
+├── isaac\
+│   ├── env\            ← Python 环境（20 GB，不要手动改）
+│   ├── work\           ← 训练实验产物（可清空）
+│   │   ├── logs\       ← TensorBoard + checkpoint
+│   │   └── *.log       ← 训练日志
+│   ├── temp\           ← 临时文件（可清空）
+│   └── pipcache\       ← pip 缓存（可清空）
+└── work\
+    └── embodied-intelligence\   ← git 仓库
+        ├── file\        ← 所有文档
+        ├── scripts\     ← activate.ps1 等工具脚本
+        ├── ros2_ws\     ← ROS 2 包（WSL 相关，暂时不用）
+        └── gazebo_media\ ← Gazebo 资源（同上）
+```
+
+---
+
+## 5. 三个必须记住的坑
+
+### 5.1 中文控制台编码
+
+**现象**：训练刚启动就退出，报
+
+```
+UnicodeEncodeError: 'gbk' codec can't encode character '\u259b'
+```
+
+**原因**：中文 Windows 代码页是 936（GBK），Isaac Lab 启动横幅含制表符 `▛`，GBK 编不出来。
+
+**解决**：`$env:PYTHONUTF8 = "1"`（activate.ps1 已包含）。
+
+### 5.2 .ps1 文件必须 UTF-8 with BOM
+
+**现象**：脚本报一堆 `表达式或语句中包含意外的标记` 解析错误，中文注释变乱码。
+
+**原因**：Windows PowerShell 5.1 读取**无 BOM** 的 .ps1 时用系统代码页（GBK）解码，UTF-8 中文被解错，字节还可能破坏引号配对。
+
+**解决**：所有含中文的 `.ps1` 必须保存为 **UTF-8 with BOM**（前 3 字节 `EF BB BF`）。
+
+**注意**：`.md` 文件不需要 BOM，保持 UTF-8 无 BOM 即可。
+
+### 5.3 不要升级 pip
+
+当前锁定 **pip 25.3**。升到 26 会触发 PEP 658 严格校验，安装 Isaac Sim 时抛 `BadMetadata` 崩溃。
+
+---
+
+## 6. WSL 侧的处置
+
+**WSL 里的原仓库保留作为备份**，路径 `/home/venus/projects/embodied-intelligence`，停留在提交 `6762d62`。
+
+**不再在 WSL 里开发。** 如果以后要做 F/G 模块（ROS 2 + Gazebo），有两种选择：
+
+1. 在 WSL 里重新 `git clone` 一份（推荐，避免 /mnt/d 上 colcon 编译慢）
+2. 把 `ros2_ws` 单独拷回 WSL 编译
+
+**WSL 环境本身没有删**：ROS 2 Jazzy、Gazebo Harmonic、turtlebot3 都还在。
+
+---
+
+## 7. 迁移记录
+
+| 项 | 内容 |
+|---|---|
+| 迁移方式 | `git bundle`（因为本地有 13 个未推送提交，不能直接从 GitHub clone） |
+| 完整性校验 | 树哈希一致：`c6f162c45b161960922de63174982dcafd465e10` |
+| 提交数 | 17（迁移前后一致） |
+| 跟踪文件 | 33（一致） |
+| 换行符处理 | 原 `core.autocrlf=true` 导致检出为 CRLF，已改为 `false` + `eol=lf`，并加 `.gitattributes` 锁定 |
+| 远程 | 已指向 `https://github.com/zquickm/Embodied_Intelligence.git` |
+
+---
+
+*创建：2026-10-21*
