@@ -221,34 +221,63 @@ $s = [System.Text.Encoding]::UTF8.GetString($b)
 fatal: unable to access 'https://github.com/...': schannel: failed to receive handshake, SSL/TLS connection failed
 ```
 
-奇怪的是 `git fetch` 能成功，只有 `git push` 失败。
+奇怪的是 `git fetch` 有时能成功，只有 `git push` 失败。
 
-**原因**：Windows 版 git 用 **schannel**（系统 TLS 栈），在特定网络环境（尤其开了代理软件时）会和 GitHub 的 TLS 握手出问题。`curl` 用自己的 TLS 实现所以正常，`git fetch` 的请求量小有时能过，`push` 的 POST 大数据量更容易失败。
+**根因**：Windows 版 git 默认用 **schannel**（系统 TLS 栈），在特定网络环境（尤其开了代理软件时）会和 GitHub 的 TLS 握手出问题。`push` 的 POST 数据量大，比 `fetch` 更容易触发。
 
-**解决**：让 git 走本地代理。先查代理端口：
+---
+
+#### ✅ 正确解法：换 SSL 后端为 OpenSSL（2026-10-22 实测确认）
+
+```powershell
+# 一次性（本次生效）
+git -c http.sslBackend=openssl push origin main
+
+# 长期（写进本仓库配置，推荐）
+git config http.sslBackend openssl
+```
+
+**实测结论（2026-10-22）**：
+
+| 尝试 | 结果 |
+|---|---|
+| `git push`（默认 schannel） | ❌ 握手失败 |
+| `git -c http.proxy=http://127.0.0.1:7897 push` | ❌ 仍然失败 |
+| **`git -c http.sslBackend=openssl push`** | ✅ **成功** |
+| `git -c http.sslBackend=openssl fetch`（不加代理） | ✅ 成功，且**不需要代理** |
+
+**重要更正**：本文档早前记录的"走本地代理"方案**不完整**。代理端口确实在监听（7897、7890 都可达），但**加代理并不能解决 schannel 的问题**——真正的病根是 TLS 后端，不是网络出不去。
+
+**为什么 openssl 前端没有额外依赖**：Windows 版 git 自带 OpenSSL 库，`http.sslBackend=openssl` 只是切换 git 使用哪一套 TLS 实现，不需要额外安装东西。
+
+**为什么建议写进仓库配置而不是全局**：这是本机 git 的 TLS 栈问题，跟具体网络环境有关，写进局部配置对未来新克隆的仓库不生效（局部配置不随仓库走），但至少当前工作副本不用每次手动加 `-c`。如果换机器或换网络后出现同样症状，再用同样两条命令。
+
+---
+
+#### 备选方案（本次未采用）
+
+```powershell
+# 强制 HTTP/1.1，绕过 HTTP/2 相关的握手问题
+git -c http.version=HTTP/1.1 push origin main
+```
+
+**仍然可以用代理**，但要知道它解决的是另一类问题（出口被墙），不是 schannel：
 
 ```powershell
 Get-NetTCPConnection -State Listen |
     Where-Object { $_.LocalPort -in @(7890,7897,10808,10809) } |
     Select-Object LocalPort, OwningProcess -Unique
-```
 
-然后用 `-c` 临时指定（不改全局配置）：
-
-```powershell
 git -c http.proxy=http://127.0.0.1:7897 push origin main
 ```
 
-**为什么用 `-c` 而不是写进配置**：代理软件不一定常开，写成全局配置后关掉代理会导致所有 git 操作都失败。用 `-c` 只在这一次生效。
+**端口说明**：2026-10-22 实测 **7897 和 7890 都在监听**。端口号取决于代理软件版本，变了自己查上一条命令。
 
-**端口说明**：本次实测 **7897 可用，7890 不可用**。端口号取决于代理软件版本，变了自己查上一条命令。
+**判断顺序**（下次遇到先按这个顺序试，省时间）：
 
-**其他备选方案**（本次未成功，但值得知道）：
-
-```powershell
-git -c http.sslBackend=openssl push origin main   # 换 OpenSSL TLS 栈
-git -c http.version=HTTP/1.1 push origin main     # 强制 HTTP/1.1
-```
+1. `git -c http.sslBackend=openssl push` ← **先试这个**
+2. 还不行 → 再考虑代理 `git -c http.proxy=...`
+3. 还不行 → `git -c http.version=HTTP/1.1`
 
 ---
 
