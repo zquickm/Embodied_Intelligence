@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import subprocess
@@ -198,6 +199,12 @@ def run_one(cfg: dict, workdir: Path) -> dict:
 
     if not curve:
         raise RuntimeError("解析到 0 个曲线点，检查 a2 脚本的输出格式")
+
+    # 训练发散时 final 可能是 NaN/Inf（例如 lr 太大直接把策略打崩）。
+    # 这种 run 不能进缓存：否则均值、std、图全被污染，事后分不清"跑坏了"和"没跑"。
+    for k in ("final", "best"):
+        if not math.isfinite(res[k]):
+            raise RuntimeError(f"{k} 不是有限值（训练发散/NaN），该配置视为失败")
 
     res.update(task=cfg["task"], lr=cfg["lr"], gamma=cfg["gamma"], hidden=cfg["hidden"],
                seed=cfg["seed"], budget=cfg["budget"],

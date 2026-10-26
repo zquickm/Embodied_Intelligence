@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -78,25 +79,23 @@ def seeds_of(runs: list[dict], task: str, cfg: dict) -> list[int]:
 
 
 def seed_curves(runs: list[dict], task: str, cfg: dict, seeds: list[int]):
-    """返回 {seed: (xs, ys)}，只保留所有种子共有的横坐标。"""
-    data = {}
+    """返回 {seed: (xs, ys)}，只保留所有种子共有、且数值有限的横坐标。"""
+    data: dict[int, dict[int, float]] = {}
     for s in seeds:
         r = match(runs, task, cfg, s)
         if r is None or not r.get("curve"):
             continue
-        xs = [int(p[0]) for p in r["curve"]]
-        ys = [float(p[1]) for p in r["curve"]]
-        data[s] = (xs, ys)
+        data[s] = {int(p[0]): float(p[1]) for p in r["curve"]}
     if len(data) < len(seeds):
         missing = [s for s in seeds if s not in data]
         print(f"  [warn] 缺种子 {missing} 的曲线，按现有 {len(data)} 个种子画")
     if not data:
         return {}
-    common = set.intersection(*(set(xs) for xs, _ in data.values()))
-    common = sorted(common)
+    common = set.intersection(*(set(d) for d in data.values()))
+    common = sorted(x for x in common if all(math.isfinite(d[x]) for d in data.values()))
     if not common:
         return {}
-    return {s: (common, [ys[xs.index(x)] for x in common]) for s, (xs, ys) in data.items()}
+    return {s: (common, [data[s][x] for x in common]) for s in data}
 
 
 def plot_seed_band(runs: list[dict], task: str, cfg: dict, out: Path, title: str) -> Path | None:
@@ -142,6 +141,7 @@ def plot_sensitivity(runs: list[dict], out: Path) -> Path | None:
             for s in seeds_of(runs, "cartpole", cfg):
                 r = match(runs, "cartpole", cfg, s)
                 finals.append(float(r["final"]))
+            finals = [f for f in finals if math.isfinite(f)]
             if not finals:
                 continue
             values.append(v)
@@ -189,6 +189,7 @@ def write_table(runs: list[dict], out: Path) -> Path | None:
             finals = []
             for s in seeds_of(runs, "cartpole", cfg):
                 finals.append(float(match(runs, "cartpole", cfg, s)["final"]))
+            finals = [f for f in finals if math.isfinite(f)]
             if finals:
                 per_value[v] = (float(np.mean(finals)), float(np.std(finals, ddof=0)), len(finals))
         if not per_value:
@@ -260,6 +261,7 @@ def main() -> None:
             continue
         finals = [(s, float(match(runs, task, cfg, s)["final"]))
                   for s in seeds_of(runs, task, cfg)]
+        finals = [(s, v) for s, v in finals if math.isfinite(v)]
         if finals:
             vals = np.array([v for _, v in finals])
             pairs = " / ".join(f"{s}:{v:.1f}" for s, v in finals)
