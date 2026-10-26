@@ -50,6 +50,23 @@ HYPER_LABEL = {"lr": "learning rate", "gamma": "discount gamma", "hidden": "hidd
 TASK_LIMIT = {"cartpole": 500.0, "lunarlander": 300.0}
 
 
+def std_of(values) -> float:
+    """样本标准差（ddof=1），与 A2 文档的报法一致。
+
+    为什么必须是 ddof=1 而不是 numpy 默认的 ddof=0：
+        A2 文档报的 LunarLander "268.7 ± 9.7" 用的是样本标准差
+        （278.4/268.7/259.1 → ddof=1 得 9.65，ddof=0 得 7.88）。
+        同一份数据在两处用不同口径，文档就会自相矛盾。
+        样本标准差也是论文/报告的通常做法：它估计的是"总体离散度"，
+        分母用 n-1 是对 n 个样本估计 1 个均值的自由度修正。
+    种子数 < 2 时无法估计离散度，返回 0.0 并在图上退化为一条线。
+    """
+    arr = np.asarray([v for v in values if math.isfinite(float(v))], dtype=float)
+    if arr.size < 2:
+        return 0.0
+    return float(arr.std(ddof=1))
+
+
 def load_runs(cache: Path) -> list[dict]:
     if not cache.exists():
         sys.exit(f"找不到缓存 {cache}\n先跑：python code/a5_sweep.py")
@@ -108,14 +125,17 @@ def plot_seed_band(runs: list[dict], task: str, cfg: dict, out: Path, title: str
     xs = next(iter(curves.values()))[0]
     mat = np.vstack([np.asarray(curves[s][1], dtype=float) for s in sorted(curves)])
     mean = mat.mean(axis=0)
-    std = mat.std(axis=0, ddof=0)
+    # 同一集数上的种子间离散度（n<2 时为 0，图上退化为一条均值线）
+    std = mat.std(axis=0, ddof=1) if mat.shape[0] > 1 else np.zeros_like(mean)
+    n_seed = mat.shape[0]
 
     fig, ax = plt.subplots(figsize=(8.5, 4.5))
     for s in sorted(curves):
         ax.plot(curves[s][0], curves[s][1], lw=0.8, alpha=0.35, label=f"seed {s}")
-    ax.plot(xs, mean, lw=2.0, color="black", label=f"mean of {len(curves)} seeds")
-    ax.fill_between(xs, mean - std, mean + std, color="black", alpha=0.15,
-                    label="+-1 std across seeds")
+    ax.plot(xs, mean, lw=2.0, color="black", label=f"mean of {n_seed} seed(s)")
+    if n_seed > 1:
+        ax.fill_between(xs, mean - std, mean + std, color="black", alpha=0.15,
+                        label="+-1 std across seeds")
     ax.axhline(TASK_LIMIT[task], ls="--", c="gray", lw=1,
                label=f"env max/threshold {TASK_LIMIT[task]:.0f}")
     ax.set_xlabel("episode" if task == "cartpole" else "timesteps")
@@ -146,7 +166,7 @@ def plot_sensitivity(runs: list[dict], out: Path) -> Path | None:
                 continue
             values.append(v)
             means.append(float(np.mean(finals)))
-            stds.append(float(np.std(finals, ddof=0)))
+            stds.append(std_of(finals))
             ns.append(len(finals))
         if len(values) >= 2:
             panels.append((hyper, values, means, stds, ns))
@@ -191,7 +211,7 @@ def write_table(runs: list[dict], out: Path) -> Path | None:
                 finals.append(float(match(runs, "cartpole", cfg, s)["final"]))
             finals = [f for f in finals if math.isfinite(f)]
             if finals:
-                per_value[v] = (float(np.mean(finals)), float(np.std(finals, ddof=0)), len(finals))
+                per_value[v] = (float(np.mean(finals)), std_of(finals), len(finals))
         if not per_value:
             continue
         default_v = DEFAULTS_CP[hyper]
@@ -216,6 +236,7 @@ def write_table(runs: list[dict], out: Path) -> Path | None:
         "# A5 超参敏感性表（CartPole + REINFORCE）",
         "",
         "> 由 `code/a5_plot_seeds.py` 自动生成。判据：|均值差| > max(该取值 std, 默认 std) 记为“有影响”。",
+        "> 均值与 std 均为跨种子统计；std 用样本标准差（ddof=1），与 A2 文档口径一致。",
         "> CartPole 单集上限 500；指标为固定预算的 final avg100（近 100 集平均）。",
         "",
         "| 超参 | 取值 | 均值 | 种子间 std | 种子数 | 相对默认 | 判断 |",
@@ -265,7 +286,7 @@ def main() -> None:
         if finals:
             vals = np.array([v for _, v in finals])
             pairs = " / ".join(f"{s}:{v:.1f}" for s, v in finals)
-            print(f"{task:11s} seeds {pairs}  mean={vals.mean():.1f} std={vals.std(ddof=0):.1f}")
+            print(f"{task:11s} seeds {pairs}  mean={vals.mean():.1f} std={std_of(vals):.1f} (ddof=1)")
 
 
 if __name__ == "__main__":
